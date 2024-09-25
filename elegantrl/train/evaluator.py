@@ -166,28 +166,36 @@ def get_cumulative_rewards_and_steps(env, actor, if_render: bool = False) -> Tup
     if_discrete = env.if_discrete
     device = next(actor.parameters()).device  # net.parameters() is a Python generator.
 
-    state = env.reset()
+    state, action_mask = env.reset()
     steps = None
     returns = 0.0  # sum of rewards in an episode
     for steps in range(max_step):
         tensor_state = torch.as_tensor(state, dtype=torch.float32, device=device).unsqueeze(0)
         tensor_action = actor(tensor_state)
+
+        # Apply action mask
+        if action_mask is not None:
+            # Convert numpy action_mask to torch tensor and ensure it is on the correct device
+            tensor_action_mask = torch.as_tensor(action_mask, dtype=torch.bool, device=device)
+            # Set the actions for masked out actions to negative infinity
+            inf_mask = torch.full_like(tensor_action, float('-inf'))
+            tensor_action = torch.where(tensor_action_mask, tensor_action, inf_mask)
+
         if if_discrete:
             if tensor_action.dim() == 1:
                 tensor_action = tensor_action.unsqueeze(0)
             tensor_action = tensor_action.argmax(dim=1)
         action = tensor_action.detach().cpu().numpy()[0]  # not need detach(), because using torch.no_grad() outside
-        state, reward, done, _ = env.step(action)
+        state, reward, done, _, action_mask = env.step(action)
         returns += reward
 
         if if_render:
             env.render()
             time.sleep(0.02)
-
         if done:
             break
-    else:
-        print("| get_rewards_and_step: WARNING. max_step > 12345")
+    # else:
+    #     print("| get_rewards_and_step: WARNING. max_step > 12345")
     returns = getattr(env, 'cumulative_returns', returns)
     steps += 1
     return returns, steps

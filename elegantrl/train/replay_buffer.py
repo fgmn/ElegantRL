@@ -51,6 +51,7 @@ class ReplayBuffer:  # for off-policy
         self.actions = torch.empty((max_size, num_seqs, action_dim), dtype=torch.float32, device=self.device)
         self.rewards = torch.empty((max_size, num_seqs), dtype=torch.float32, device=self.device)
         self.undones = torch.empty((max_size, num_seqs), dtype=torch.float32, device=self.device)
+        self.action_masks = torch.empty((max_size, num_seqs, 4), dtype=torch.bool, device=self.device)  # to be fixed
 
         self.if_use_per = if_use_per
         if if_use_per:
@@ -67,8 +68,8 @@ class ReplayBuffer:  # for off-policy
             self.per_beta = None
 
     def update(self, items: Tuple[Tensor, ...]):
-        self.add_item = items
-        states, actions, rewards, undones = items
+        self.add_item = items     
+        states, actions, rewards, undones, action_masks = items
         # assert states.shape[1:] == (env_num, state_dim)
         # assert actions.shape[1:] == (env_num, action_dim)
         # assert rewards.shape[1:] == (env_num,)
@@ -87,11 +88,13 @@ class ReplayBuffer:  # for off-policy
             self.actions[p0:p1], self.actions[0:p] = actions[:p2], actions[-p:]
             self.rewards[p0:p1], self.rewards[0:p] = rewards[:p2], rewards[-p:]
             self.undones[p0:p1], self.undones[0:p] = undones[:p2], undones[-p:]
+            self.action_masks[p0:p1], self.action_masks[0:p] = action_masks[:p2], action_masks[-p:]
         else:
             self.states[self.p:p] = states
             self.actions[self.p:p] = actions
             self.rewards[self.p:p] = rewards
             self.undones[self.p:p] = undones
+            self.action_masks[self.p:p] = action_masks
 
         if self.if_use_per:
             '''data_ids for single env'''
@@ -106,7 +109,7 @@ class ReplayBuffer:  # for off-policy
         self.p = p
         self.cur_size = self.max_size if self.if_full else self.p
 
-    def sample(self, batch_size: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor]:
+    def sample(self, batch_size: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
         sample_len = self.cur_size - 1
 
         ids = torch.randint(sample_len * self.num_seqs, size=(batch_size,), requires_grad=False)
@@ -117,9 +120,11 @@ class ReplayBuffer:  # for off-policy
                 self.actions[ids0, ids1],
                 self.rewards[ids0, ids1],
                 self.undones[ids0, ids1],
-                self.states[ids0 + 1, ids1],)  # next_state
+                self.states[ids0 + 1, ids1],      # next_state
+                self.action_masks[ids0, ids1],
+                )
 
-    def sample_for_per(self, batch_size: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
+    def sample_for_per(self, batch_size: int) -> Tuple[Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor, Tensor]:
         beg = -self.max_size
         end = (self.cur_size - self.max_size) if (self.cur_size < self.max_size) else -1
 
@@ -148,6 +153,7 @@ class ReplayBuffer:  # for off-policy
             self.states[ids0 + 1, ids1],  # next_state
             is_weights,  # important sampling weights
             is_indices,  # important sampling indices
+            self.action_masks[ids0, ids1],
         )
 
     def td_error_update_for_per(self, is_indices: Tensor, td_error: Tensor):  # td_error = (q-q).detach_().abs()
@@ -169,6 +175,7 @@ class ReplayBuffer:  # for off-policy
             (self.actions, "actions"),
             (self.rewards, "rewards"),
             (self.undones, "undones"),
+            (self.action_masks, "masks"),
         )
 
         if if_save:

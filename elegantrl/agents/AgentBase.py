@@ -33,6 +33,7 @@ class AgentBase:
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.last_state = None  # last state of the trajectory for training. last_state.shape == (num_envs, state_dim)
+        self.last_action_mask = None
         self.device = torch.device(f"cuda:{gpu_id}" if (torch.cuda.is_available() and (gpu_id >= 0)) else "cpu")
 
         '''network'''
